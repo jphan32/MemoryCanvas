@@ -12,3 +12,4 @@ if [ -f .env ]; then
 
 nohup python -u app.py >> ./logs/app.log 2>&1 &
 echo $! > $PID
+

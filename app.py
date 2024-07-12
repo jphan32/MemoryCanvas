@@ -7,12 +7,11 @@ import os
 import requests
 from openai import OpenAI
 
-
 client = OpenAI()
 
 headers = {
-  "Content-Type": "application/json",
-  "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"
 }
 
 
@@ -21,14 +20,14 @@ def encode_image(image_path):
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 
-def draw_image(class_value, name_value, text_value, image_path, image_gallery):
+def draw_image(class_value, name_value, text_value, image_path, images):
     if not class_value or not name_value:
         gr.Warning("학년 반 번호와 이름을 입력해주세요.", duration=5)
-        return None
+        return None, images
 
     if not text_value:
         gr.Warning("어떤 그림을 그릴지 인공지능에게 설명해주세요.", duration=5)
-        return None
+        return None, images
 
     # Generate prompt for the drawing image generation
     if image_path:
@@ -79,42 +78,53 @@ User input:
         # print(json["choices"][0]["message"]["content"])
         text_value = json["choices"][0]["message"]["content"]
 
-    response = client.images.generate(
-        model="dall-e-3",
-        prompt=text_value,
-        size="1024x1024",
-        quality="hd",
-        n=1,
-    )
+    try:
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=text_value,
+            size="1024x1024",
+            quality="hd",
+            n=1,
+        )
+    except Exception as e:
+        gr.Warning("인공지능에게 전달한 문장을 다시 한 번 확인해보세요.", duration=5)
+        return None, images
 
     image_url = response.data[0].url
-    processed_image = gr.Image(image_url, interactive=False)
+    drawing_image = gr.Image(image_url, interactive=False)
 
     # Update image gallery
-    if not image_gallery:
-        image_gallery = [image_url]
+    if not images:
+        images = [image_url]
     else:
-        image_gallery.append(image_url)
+        images.append(image_url)
 
-    return processed_image, image_gallery
+    return drawing_image, images
 
 
-def save_image(image_gallery, class_value, name_value):
-    if not image_gallery or not class_value or not name_value:
+def get_select_index(evt: gr.SelectData):
+    return evt.index
+
+
+def save_image(images, selected_index, class_value, name_value):
+    if not images or not class_value or not name_value:
+        gr.Error("저장할 이미지가 없거나 이름을 입력하지 않았습니다.", duration=5)
         return
 
-    print(image_gallery)
-    for img in image_gallery:
+    if selected_index == -1:
+        gr.Warning("이미지를 선택하지 않았습니다.", duration=5)
+        return
+
+    print(images, selected_index)
+    for img in images:
         unique_filename = f"./work/{class_value}_{name_value}_{uuid.uuid4()}.png"
         print(img[0], unique_filename)
         shutil.copy2(img[0], unique_filename)
-    """
-    image_data = requests.get(image_gallery).content
-    unique_filename = f"{class_value}_{name_value}_{uuid.uuid4()}.png"
-    with open(unique_filename, "wb") as f:
-        f.write(image_data)
-    print(f"Image saved as {unique_filename}")
-    """
+
+    if selected_index is not None:
+        shutil.copy2(images[selected_index][0], f"./work/{class_value}_{name_value}_Selected.png")
+
+    gr.Info("선택한 이미지를 저장했습니다.", duration=5)
 
 
 with gr.Blocks() as demo:
@@ -123,14 +133,15 @@ with gr.Blocks() as demo:
     gr.Markdown("## 누가 그릴까요? 👩‍🎨")
     with gr.Row():
         with gr.Column():
-            class_input = gr.Textbox(label="학년 반 번호", lines=1)
+            class_input = gr.Textbox(label="학년 반 번호", lines=1, placeholder="예) 6101")
         with gr.Column():
             name_input = gr.Textbox(label="이름", lines=1)
 
     gr.Markdown("## 어떤 그림을 그릴까요? 🎨")
     with gr.Row():
         with gr.Column():
-            text_input = gr.Textbox(label="인공지능에게 전달할 문장을 입력해주세요.", lines=10)
+            text_input = gr.Textbox(label="인공지능에게 전달할 문장을 입력해주세요.", lines=10,
+                                    placeholder="예) 만화 캐릭터 고양이를 수채화 느낌으로 그려줘.")
         with gr.Column():
             image_input = gr.Image(label="인공지능에게 전달할 이미지를 업로드 해주세요.", type="filepath")
     with gr.Row():
@@ -142,7 +153,8 @@ with gr.Blocks() as demo:
         processed_image = gr.Image(label="그림 결과물", interactive=False)
 
     with gr.Row():
-        image_gallery = gr.Gallery(label="지금까지 그린 그림들", interactive=False)
+        image_gallery = gr.Gallery(label="지금까지 그린 그림들", columns=8, interactive=False)
+        selected = gr.Number(value=-1, show_label=False, visible=False)
 
     save_button = gr.Button("선택한 이미지 저장하기")
 
@@ -150,7 +162,8 @@ with gr.Blocks() as demo:
     draw_button.click(draw_image,
                       inputs=[class_input, name_input, text_input, image_input, image_gallery],
                       outputs=[processed_image, image_gallery])
-    save_button.click(save_image, inputs=[image_gallery, class_input, name_input], outputs=[])
+    image_gallery.select(get_select_index, None, selected)
+    save_button.click(save_image, inputs=[image_gallery, selected, class_input, name_input], outputs=[])
 
 if __name__ == "__main__":
-    demo.queue().launch(share=True, debug=True)
+    demo.queue().launch(share=False, debug=True)
